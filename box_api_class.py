@@ -421,7 +421,8 @@ class box_api():
 		destination = destination.replace(":","/")
 		if not os.path.isdir(os.path.dirname(destination)):
 			logging.info(f"box_api_class.box_api().download_files() :: Making directory {os.path.dirname(destination)}")
-			os.mkdir(os.path.dirname(destination))
+			if not os.path.exists(os.path.dirname(destination)):
+				os.mkdir(os.path.dirname(destination))
 		logging.info(f'box_api_class.box_api().download_files() :: Downloading file {files} to {destination}')
 		
 		# limit for maximum threads
