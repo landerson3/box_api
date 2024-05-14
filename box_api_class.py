@@ -325,12 +325,14 @@ class box_api():
 		return res
 	
 	def get_folder_items(self, folder_id: str|int, include_subfolders:bool = True, offset:int = 0, limit:int = 1000, exclusions:str|list|tuple = None, previous_res = None) -> list:
-		## take a folder ID and recursively return all assets from all subfolders if desired
-		## folder_id - string/integer of the folder_ID to sort
-		# include_subfolders - if true, report on all subfolders
-		# offset - for folders with more than 1000 items, we need multiple requests
-		# limit - default 1000 as the maximum number of assets to return at once
-		# exclusions - string/int/list of folder IDs to exclude from the report
+		''' 
+		Takes a folder ID and recursively return all assets from all subfolders if desired
+		folder_id - string/integer of the folder_ID to sort
+		include_subfolders - if true, report on all subfolders
+		offset - for folders with more than 1000 items, we need multiple requests
+		limit - default 1000 as the maximum number of assets to return at once
+		exclusions - string/int/list of folder IDs to exclude from the report
+		'''
 		# print(f"Getting assets from folderID {folder_id} with offset of {offset}", flush = True)
 		if exclusions != None:
 			if type(exclusions) == str: exclusions = list(exclusions)
@@ -362,7 +364,13 @@ class box_api():
 		for entry in entries:
 			if include_subfolders:
 				if entry['type'] == "folder" and entry['id'] not in exclusions: self.get_folder_items(entry['id'],True, exclusions=exclusions, previous_res=self.global_result) # recursion
-			res = {'name':entry['name'],'path':f"{path}{folder_info['name']}/{entry['name']}",'id':entry['id']}
+			res = {
+				'name':entry['name'],
+				'path':f"{path}{folder_info['name']}/{entry['name']}", ## return the box bath in the format of ".../.../.../file.ext"
+				'id':entry['id'],
+				'sha1':entry['sha1'],
+				'parent': entry['parent']
+				}
 			self.global_result.append(res)
 		if len(entries) >= 1000:
 			offset = int(response_json['offset'])+len(entries)
