@@ -369,8 +369,9 @@ class box_api():
 				'path':f"{path}{folder_info['name']}/{entry['name']}", ## return the box bath in the format of ".../.../.../file.ext"
 				'id':entry['id'],
 				'sha1':entry['sha1'],
-				'parent': entry['parent']
+				
 				}
+			if 'parent' in entry: res['parent'] = entry['parent']
 			self.global_result.append(res)
 		if len(entries) >= 1000:
 			offset = int(response_json['offset'])+len(entries)
@@ -648,7 +649,11 @@ class box_api():
 
 			return r
 		
-	# Get shared link for file
+	def rename_file(self, file_id:str|int, new_name:str)->requests.Response:
+		url  = f'https://api.box.com/2.0/files/{file_id}'
+		data = {'name':new_name}
+		r = requests.put(url, headers=self.headers, data = json.dumps(data))
+		return r
 
 # b = box_api()
 # b.download_files('1229860044402')
