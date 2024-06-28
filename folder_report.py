@@ -2,7 +2,7 @@ import os, sys
 sys.path.insert(0,os.path.expanduser('~'))
 from box_api import box_api_class
 
-def main():
+def folder_report():
 	if len(sys.argv) != 2:
 		return
 	else:
@@ -13,4 +13,5 @@ def main():
 			for f in files:
 				csv.write(','.join(f.values())+'\n')
 
-main()
+if __name__ == '__main__':
+	folder_report()
