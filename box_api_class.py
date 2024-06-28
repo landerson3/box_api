@@ -22,7 +22,7 @@ class box_api():
 		try:
 			self.config = json.load(open('box_config.json'))
 		except FileNotFoundError:
-			self.config = json.load(open(os.path.expanduser('~/Galaxy_Box_Integration/box_config.json')))
+			self.config = json.load(open(os.path.expanduser('~/box_api/box_config.json')))
 		logging.debug('box_api_class.box_api() :: Config loaded')
 		self.max_threads = 100
 		try:
@@ -164,9 +164,13 @@ class box_api():
 		return r
 		# logging.info(f"Uploading :: {file} to {folder_id}")
 
-	def upload_chunk(self, bytes_chunk: str|bytes, headers: dict, session_id: str|int, brange: tuple|list) -> requests.Response:
+	def upload_chunk(self, bytes_chunk: str|bytes, headers: dict, session_id: str|int, brange: tuple|list, attempts = 0) -> requests.Response|None:
 		# upload a chunk of a file
 		# check that the offset isn't already in the parts_to_comit
+		rest_time = (attempts * 2)*.25
+		time.sleep(rest_time)
+		attempts +=1
+		if attempts >= 10: return None
 		for i in self.total_parts_to_commit:
 			if i['offset'] == brange[0]: break
 		else:
@@ -178,16 +182,14 @@ class box_api():
 				})
 		try:
 			r = requests.put(f'https://upload.box.com/api/2.0/files/upload_sessions/{session_id}', 
-				headers = headers, data = bytes_chunk)
+				headers = headers, data = bytes_chunk, timeout = 120)
 			if r.status_code == 500:
 				r = self.upload_chunk(bytes_chunk, headers, session_id, brange)
 				# r = self.upload_chunk(bytes_chunk, headers, session_id, brange)
-		except (ConnectionResetError,requests.exceptions.ConnectionError):
-			r = self.upload_chunk(bytes_chunk,headers,session_id,brange)
-		except json.decoder.JSONDecodeError:
-			time.sleep(1)
-			r = self.upload_chunk(bytes_chunk,headers,session_id,brange)
+		except (ConnectionResetError,requests.exceptions.ConnectionError, json.decoder.JSONDecodeError) as err:
+			r = self.upload_chunk(bytes_chunk,headers,session_id,brange,attempts=attempts)					
 		logging.debug(f"box_api.upload_chunk() :: response evaluated with 'r' value of {r}")
+		if r == None: return None
 		if r.status_code >300:
 			pass
 		for i in self.total_parts_to_commit:
@@ -203,9 +205,7 @@ class box_api():
 		# print(r.content,"\n",flush = True)
 		
 	def upload_as_chunk(self, file: str) -> requests.Response:
-		## uploads the total file (calls upload_chunk for each chunk of the file)
-		# print("Thread count: ", threading.active_count(), flush = True)
-		initial_thread_count = threading.active_count()
+		'''Uploads the total file (calls upload_chunk for each chunk of the file)'''
 		self.total_parts_to_commit = []
 		chunk_size = self.upload_session['part_size']
 		total_parts = self.upload_session['total_parts']
@@ -222,15 +222,17 @@ class box_api():
 			self.bfile = bytes(file)
 		logging.debug('Byte file opened and read')
 		file_size = os.path.getsize(file)
-		
+		chunk_threads = []
 		for part in range(int(total_parts)):
-			self.chunk_driver(part, file_size)
+			chunk_threads.append(self.chunk_driver(part, file_size))
 		## commit the session
 		commit_headers = self.authheaders ## need to build this out still
 		commit_headers['Digest']= str("sha="+base64.b64encode(hashlib.sha1(self.bfile).digest()).decode('utf-8'))
 		
-		while initial_thread_count < threading.active_count():
+		count_active_chunk_uploads = lambda cthds: len([t for t in cthds if t.is_alive()])		
+		while count_active_chunk_uploads(chunk_threads):
 			continue
+
 		
 		r = self.commit_session(commit_headers, file_size)
 
@@ -263,7 +265,10 @@ class box_api():
 		headers['digest'] = str('sha='+digest.decode('utf-8'))
 		# print(part,flush=True)
 		while threading.active_count()>self.max_threads: continue ## limit threads
-		threading.Thread(target = self.upload_chunk, args = (bytes_chunk,headers,session_id, brange)).start()
+		t = threading.Thread(target = self.upload_chunk, args = (bytes_chunk,headers,session_id, brange))
+		t.start()
+		return t
+		
 		# self.upload_chunk(bytes_chunk,headers,session_id, brange)
 	
 	
@@ -355,29 +360,34 @@ class box_api():
 		entries = response_json['entries']
 		# if offset == 0: self.global_result == []
 		if None in [self.global_result, previous_res]: self.global_result = []
-		
-			# build the current folder path for appending names from entries
+		# build the current folder path for appending names from entries
 		folder_info = self.get_folder_information(folder_id)
 		if folder_info != None:
 			path = self.path_collection_to_path(folder_info['path_collection'])
 		elif folder_info == None: path = f"Error generating path for {folder_id}"
 		for entry in entries:
 			if include_subfolders:
-				if entry['type'] == "folder" and entry['id'] not in exclusions: self.get_folder_items(entry['id'],True, exclusions=exclusions, previous_res=self.global_result) # recursion
+				if entry['type'] == "folder":
+					if exclusions != None and entry['id'] not in exclusions: continue
+					self.get_folder_items(entry['id'], True, exclusions=exclusions, previous_res=self.global_result) # recursion
+			'''allow the exclusions parameter to contain 'folder' 
+   			and 'file' so we can get just the folders or just the files in a directory'''
+			if exclusions != None and entry['type'] in exclusions: continue
 			res = {
 				'name':entry['name'],
 				'path':f"{path}{folder_info['name']}/{entry['name']}", ## return the box bath in the format of ".../.../.../file.ext"
-				'id':entry['id'],
-				'sha1':entry['sha1'],
-				
+				'id':entry['id']
 				}
+			if 'sha1' in entry: res['sha1'] = entry['sha1']
 			if 'parent' in entry: res['parent'] = entry['parent']
+			# for k in entry.keys():
+			# 	if k in 'res': continue
+			# 	if k == 'file_version': continue
+			# 	else: res[k] = entry[k]
 			self.global_result.append(res)
 		if len(entries) >= 1000:
 			offset = int(response_json['offset'])+len(entries)
-			self.get_folder_items(folder_id,include_subfolders,offset)
-		
-			
+			self.get_folder_items(folder_id,include_subfolders,offset = offset,exclusions=exclusions,previous_res = self.global_result)		
 		return self.global_result
 	
 	def download_chunk(self, file_id: str|int, _range: str) -> None: ## expect the _range to be like f"bytes={download_range[0]}-{download_range[1]}""
@@ -558,7 +568,7 @@ class box_api():
 			p['ancestor_folder_ids']=folder
 		return self.search(p)
 
-	def create_folder(self, parent_id=0, name="new_folder"):
+	def create_folder(self, parent_id=0, name="new_folder") -> str:
 		logging.debug(f"Creating folder {name} in parent {parent_id}")
 		url = "https://api.box.com/2.0/folders"
 		headers = self.headers
@@ -571,7 +581,7 @@ class box_api():
 
 		if r.status_code == 201:
 			logging.debug(f'Succesfully created folder')
-			return r.json()['id']
+			return str(r.json()['id'])
 		elif r.status_code == 409 and r.json()['code'] == "item_name_in_use":
 			res = r.json()['context_info']['conflicts'][0]['id']
 			logging.debug(f"Folder exists, returning {res}")
