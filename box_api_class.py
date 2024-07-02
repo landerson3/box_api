@@ -380,6 +380,7 @@ class box_api():
 				}
 			if 'sha1' in entry: res['sha1'] = entry['sha1']
 			if 'parent' in entry: res['parent'] = entry['parent']
+			if 'created_at' in entry: res['created_at'] = entry['created_at']
 			# for k in entry.keys():
 			# 	if k in 'res': continue
 			# 	if k == 'file_version': continue
